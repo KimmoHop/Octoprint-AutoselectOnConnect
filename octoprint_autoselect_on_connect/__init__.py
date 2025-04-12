@@ -81,8 +81,6 @@ class AutoConnectAndSelectFilePlugin(octoprint.plugin.EventHandlerPlugin):
         self._waiting_for_sync = False
         self._sync_state = SYNC_IDLE
         self._max_sync_attempts = 20
-        self._is_action_print_started = False
-        self._is_action_print_tries = 20
 
         self._pp = pprint.PrettyPrinter(indent=2, sort_dicts=False)
 
@@ -100,6 +98,7 @@ class AutoConnectAndSelectFilePlugin(octoprint.plugin.EventHandlerPlugin):
         file_name = candidate[len(self._action_command):].strip()
 
         files = self.get_latest_local_files(None)
+        is_started = False
         if files:
             for file in files:
                 _, path, _, _ = file
@@ -108,29 +107,34 @@ class AutoConnectAndSelectFilePlugin(octoprint.plugin.EventHandlerPlugin):
                 # we can't be sure *which* will be printed.
                 # Starting from newest should help :)
                 if file_name in path:
+                    # select that file and start printing
+                    self._logger.info(f"Selecting and starting {path}")
+                    self._printer.select_file(path, False, False)
+                    self._logger.info(f"STARTING PRINT '{file_name}' :)")
+                    self._printer.start_print()
+                    is_started = True
 
-                    def condition():
-                        return self._is_action_print_tries > 0 and not self._is_action_print_started
+        if not is_started:
+            self._logger.info(f"Did not find '{file_name}' to print :/")
 
-                    def do_start():
-                        self._is_action_print_tries -= 1
-                        if self._printer.is_operational and not self._printer.is_printing and self._printer.is_sd_ready():
-                            self._is_action_print_started = True
-                            # select that file and start printing
-                            self._logger.info(f"Selecting and starting {path}")
-                            self._printer.select_file(path, False, False)
-                            self._logger.info(f"STARTING PRINT '{file_name}' :)")
-                            self._printer.start_print()
-
-                    # launch link file sync in separate thread, SD content is not available right now
-                    self.timer = RepeatedTimer(3, do_start, run_first=True, condition=condition)
-
-                    self._is_action_print_started = False
-                    self._is_action_print_tries = 20
-                    self.timer.start()
-
-                else:
-                    self._logger.info(f"Did not find '{file_name}' to print :/")
+        # # get all local gcode files
+        # files = self._file_manager.list_files(FileDestinations.LOCAL, filter=filter_machinecode, recursive=True)
+        # files = files["local"] if "local" in files else dict()
+        #
+        # if files:
+        #     for key in files:
+        #         file = files[key]
+        #         path = file["path"]
+        #         # local path is not important,
+        #         # though if there are files with same names in multiple directories,
+        #         # we can't be sure *which* will be printed
+        #         if file_name in path:
+        #             # select that file and start printing
+        #             self._logger.info(f"Selecting and starting {path}")
+        #             self._printer.select_file(path, False, False)
+        #             self._printer.start_print()
+        # else:
+        #     self._logger.info(f"Did not find '{file_name}' to print :/")
 
     def sync_sd_with_local(self):
         """
@@ -360,8 +364,8 @@ class AutoConnectAndSelectFilePlugin(octoprint.plugin.EventHandlerPlugin):
         self._max_sync_attempts = 20
         self._move_to_state(SYNC_LAUNCHING, message="Launching")
         self.timer.start()
-        # t = threading.Timer(2, do_sync)
-        # t.start()
+        t = threading.Timer(2, do_sync)
+        t.start()
 
     def get_latest_local_files(self, number_of_files: Optional[int]) -> List[Tuple]:
         # get all local gcode files
